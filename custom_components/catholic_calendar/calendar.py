@@ -120,14 +120,22 @@ class CatholicCalendar(CalendarEntity):
 
             color = str(festivity.get('liturgical_color', 'Unknown')).capitalize()
             
-            # Build the rich description
+            # Format date for USCCB URL structure (MMDDYY)
+            usccb_date_str = date_val.strftime('%m%d%y')
+            usccb_url = f"https://bible.usccb.org/bible/readings/{usccb_date_str}.cfm"
+            
+            # Build the rich description with Spotify, USCCB, and My Catholic Life links
             encoded_name = urllib.parse.quote(summary)
             desc = (
                 f"Vestment Color: {color}\n"
                 f"Rank: {grade_name}\n\n"
-                f"📖 Daily Readings & Reflection:\n"
+                f"📖 USCCB Daily Scripture Readings:\n"
+                f"{usccb_url}\n\n"
+                f"🎧 Listen on Spotify (Catholic Daily Reflections):\n"
+                f"https://open.spotify.com/show/2uQGw4NXrRGubjtbeLKiTs\n\n"
+                f"🕊️ My Catholic Life! Reflection & Calendar:\n"
                 f"https://mycatholic.life/liturgy/liturgical-calendar/\n\n"
-                f"🔍 Learn more about this day:\n"
+                f"🔍 Search My Catholic Life for '{summary}':\n"
                 f"https://mycatholic.life/?s={encoded_name}"
             )
 
