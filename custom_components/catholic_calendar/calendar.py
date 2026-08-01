@@ -1,58 +1,46 @@
 """CatholicCalendar calendar"""
 from __future__ import annotations
-import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
+
 import logging
-from homeassistant.const import CONF_NAME
-from homeassistant.components.calendar import (
-    PLATFORM_SCHEMA,
-    CalendarEntity,
-    CalendarEvent,
-)
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType, StateType
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .calendar_generator import CalendarGenerator
-from homeassistant.core import HomeAssistant
 import datetime
 from datetime import timedelta, timezone
+
+from homeassistant.components.calendar import CalendarEntity, CalendarEvent
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
+
+from .calendar_generator import CalendarGenerator
 from .liturgical_grade import LiturgicalGrade
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 __version__ = "1.0.1"
 
-COMPONENT_REPO = (
-    "https://github.com/jmacri01/homeassistant-custom-components-catholic-calendar"
-)
+COMPONENT_REPO = "https://github.com/trooperthorn/hass-catholic-calendar"
 
-REQUIREMENTS = []
-
-DEFAULT_THUMBNAIL = "https://www.home-assistant.io/images/favicon-192x192-full.png"
-
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
-    {vol.Required(CONF_NAME): cv.string},
-)
-
-_LOGGER: logging.Logger = logging.getLogger(__name__)
-
-
-async def async_setup_platform(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config: ConfigType,
-    async_add_devices: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the CatholicCalendar sensor."""
-    async_add_devices(
+    """Set up the CatholicCalendar platform from a UI config entry."""
+    
+    # We pull the name from the title provided during the UI setup, 
+    # instead of looking for it in configuration.yaml
+    name = entry.title or "Catholic Calendar"
+    
+    async_add_entities(
         [
             CatholicCalendar(
-                name=config[CONF_NAME],
+                name=name,
             ),
         ],
         update_before_add=True,
     )
 
+# ... Leave your `class CatholicCalendar(CalendarEntity):` and everything below it exactly as it is ...
 
 class CatholicCalendar(CalendarEntity):
     """Representation of a CatholicCalendar calendar."""
