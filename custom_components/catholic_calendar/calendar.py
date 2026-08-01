@@ -58,9 +58,11 @@ class CatholicCalendar(CalendarEntity):
             "entry_type": "service",
         }
 
+        # --- Initialize all tracking variables expected by the legacy code ---
         self._years_loaded: list[int] = []
         self._events = []
-        # ... Leave the rest of your original __init__ code below here ...
+        self._festivities = {}
+        # ---------------------------------------------------------------------
         # (e.g., setting up your CalendarGenerator, etc.)
 
     def __repr__(self: CatholicCalendar) -> str:
