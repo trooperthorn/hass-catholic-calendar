@@ -1,5 +1,20 @@
-"""CatholicCalendar.
+"""The Catholic Calendar integration."""
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 
-For more details about this component, please refer to the documentation at
-https://github.com/jmacri01/homeassistant-custom-components-catholic-calendar
-"""
+from .const import DOMAIN
+
+PLATFORMS = ["sensor", "calendar"]
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up Catholic Calendar from a config entry."""
+    hass.data.setdefault(DOMAIN, {})
+    
+    # Forward the setup to the sensor and calendar files
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    return unload_ok
