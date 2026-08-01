@@ -69,22 +69,62 @@ class CatholicCalendar(CalendarEntity):
     def __repr__(self: CatholicCalendar) -> str:
         """Return the representation."""
         return "CatholicCalendar"
+#
+async def async_load_year(self, year: int) -> None:
+        """Run the heavy synchronous generator in a background thread."""
+        if year in self._years_loaded:
+            return
+
+        # Tell the synchronous generator to calculate this year
+        self._generator.set_year(year)
+        
+        # Run the heavy file-reading and looping generation in the background executor
+        festivities = await self.hass.async_add_executor_job(
+            self._generator.generate_festivities
+        )
+
+        # Parse the returned list into Home Assistant CalendarEvents
+        for festivity in festivities:
+            summary = festivity.get("name", "Unknown")
+            date_val = festivity.get("date")
+            
+            # Convert datetime to date if the generator returns datetimes
+            if isinstance(date_val, datetime.datetime):
+                date_val = date_val.date()
+                
+            if date_val:
+                # Store it in the class list
+                self._events.append(
+                    CalendarEvent(
+                        summary=summary,
+                        start=date_val,
+                        end=date_val + datetime.timedelta(days=1),
+                        description=f"Color: {festivity.get('liturgical_color', '')}\nGrade: {festivity.get('liturgical_grade', '')}"
+                    )
+                )
+
+        # Mark the year as loaded and sort chronological
+        self._years_loaded.append(year)
+        self._events.sort(key=lambda e: e.start)
+
 
     @property
     def event(self) -> CalendarEvent | None:
-        """Return the next upcoming event."""
+        """Return the next upcoming event for Home Assistant state."""
+        # Safety check: if data isn't loaded yet, do nothing (don't generate!)
+        if not hasattr(self, "_events") or not self._events:
+            return None
+        
         curr_date = dt_util.now().date()
         
-        if not hasattr(self, "_years_loaded") or not hasattr(self, "_events"):
-            return None
-            
-        if curr_date.year not in self._years_loaded:
-            self.__generate_festivities(curr_date.year)
+        # Iterate over pre-sorted list to find the next event
+        for event in self._events:
+            event_date = event.start if isinstance(event.start, datetime.date) else event.start.date()
+            if event_date >= curr_date:
+                return event
+                
+        return None
 
-        events = self.__get_calendar_events(curr_date)
-        if len(events) == 0:
-            return None
-        return events[0]
 
     async def async_get_events(
         self,
@@ -93,36 +133,25 @@ class CatholicCalendar(CalendarEntity):
         end_date: datetime.datetime,
     ) -> list[CalendarEvent]:
         """Return calendar events within a datetime range."""
-        for year in range(start_date.year, end_date.year + 1):
+        _LOGGER.debug("Fetching events between %s and %s", start_date, end_date)
+        
+        # 1. Determine which years are needed to fulfill the UI request
+        years_needed = set(range(start_date.year, end_date.year + 1))
+        
+        # 2. Trigger background generation for missing years
+        for year in years_needed:
             if year not in self._years_loaded:
-                self.__generate_festivities(year)
+                await self.async_load_year(year)
+
+        # 3. Filter the pre-calculated list for the requested date range
         calendar_events = []
-
-        curr_date = start_date
-        while curr_date <= end_date:
-            _LOGGER.debug("getting calender event for date: %s", curr_date)
-            calendar_events.extend(self.__get_calendar_events(curr_date))
-            curr_date += datetime.timedelta(days=1)
-
-        _LOGGER.debug("retrieved calendar_events: %s", calendar_events)
-        return calendar_events
-
-    def __get_calendar_events(self, date) -> list[CalendarEvent]:
-        calendar_events = []
-        if datetime.datetime(date.year, date.month, date.day) in self._festivities:
-            for festivity in sorted(
-                self._festivities[datetime.datetime(date.year, date.month, date.day)],
-                key=lambda x: x["liturgical_grade"] or 0,
-                reverse=True,
-            ):
-                calendar_events.append(
-                    CalendarEvent(
-                        start=datetime.date(date.year, date.month, date.day),
-                        end=datetime.date(date.year, date.month, date.day),
-                        summary=festivity["name"],
-                        description=f"liturgical_color: {festivity['liturgical_color']}, liturgical_grade: {LiturgicalGrade.descr(festivity['liturgical_grade'])}",
-                    )
-                )
+        for event in self._events:
+            event_date = event.start if isinstance(event.start, datetime.date) else event.start.date()
+            
+            if start_date.date() <= event_date <= end_date.date():
+                calendar_events.append(event)
+                
+        _LOGGER.debug("Retrieved %d events", len(calendar_events))
         return calendar_events
 
     def __generate_festivities(self, year):
@@ -134,3 +163,34 @@ class CatholicCalendar(CalendarEntity):
             if key not in self._festivities:
                 self._festivities.update({key: []})
             self._festivities[key].extend(festivities[key])
+
+    async def async_load_year(self, year: int) -> None:
+        """Run the heavy synchronous generator in a background thread."""
+        if year in self._years_loaded:
+            return
+
+    # Tell Home Assistant to run the blocking generation on a worker thread
+        self._generator.set_year(year) # (Or however your generator accepts the year)
+        festivities = await self.hass.async_add_executor_job(
+            self._generator.generate_festivities
+        )
+
+        # Once the thread finishes, process the results back on the main loop
+        for festivity in festivities:
+            # Create your summary/description based on the generated data
+            summary = festivity.get("name", "Unknown")
+            date_val = festivity.get("date")
+        
+            if date_val:
+                self._events.append(
+                    CalendarEvent(
+                        summary=summary,
+                        start=date_val,
+                        end=date_val + datetime.timedelta(days=1),
+                        description=f"Color: {festivity.get('liturgical_color')} \nGrade: {festivity.get('liturgical_grade')}"
+                    )
+                )
+
+        self._years_loaded.append(year)
+        # Sort events chronologically so the event property works correctly
+        self._events.sort(key=lambda e: e.start)  
