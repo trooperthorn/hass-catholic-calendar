@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 import datetime
+import urllib.parse
+
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
@@ -100,6 +102,50 @@ class CatholicCalendar(CalendarEntity):
                         start=date_val,
                         end=date_val + datetime.timedelta(days=1),
                         description=f"Color: {festivity.get('liturgical_color', 'Unknown')}\nGrade: {festivity.get('liturgical_grade', 'Unknown')}"
+                    )
+                )
+
+
+            # 1. Translate the numerical grade into a human-readable rank
+                GRADE_MAP = {
+                    0: "Weekday",
+                    1: "Commemoration",
+                    2: "Optional Memorial",
+                    3: "Memorial",
+                    4: "Feast",
+                    5: "Feast of the Lord",
+                    6: "Solemnity",
+                    7: "High Solemnity"
+                }
+                
+                raw_grade = festivity.get('liturgical_grade', 0)
+                try:
+                    grade_name = GRADE_MAP.get(int(raw_grade), str(raw_grade))
+                except (ValueError, TypeError):
+                    grade_name = str(raw_grade)
+
+            # 2. Format the color
+                color = str(festivity.get('liturgical_color', 'Unknown')).capitalize()
+            
+            # 3. Generate dynamic links to My Catholic Life
+                encoded_name = urllib.parse.quote(summary)
+            
+                desc = (
+                    f"Vestment Color: {color}\n"
+                    f"Rank: {grade_name}\n\n"
+                    f"📖 Daily Readings & Reflection:\n"
+                    f"https://mycatholic.life/liturgy/liturgical-calendar/\n\n"
+                    f"🔍 Learn more about this day:\n"
+                    f"https://mycatholic.life/?s={encoded_name}"
+                )
+
+            # 4. Append the rich event to the calendar
+                self._events.append(
+                    CalendarEvent(
+                        summary=summary,
+                        start=date_val,
+                        end=date_val + datetime.timedelta(days=1),
+                        description=desc
                     )
                 )
 
