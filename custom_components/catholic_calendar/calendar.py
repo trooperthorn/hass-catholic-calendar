@@ -71,6 +71,10 @@ class CatholicCalendar(CalendarEntity):
     def event(self) -> CalendarEvent | None:
         """Return the next upcoming event."""
         curr_date = dt_util.now().date()
+        
+        if not hasattr(self, "_years_loaded") or not hasattr(self, "_events"):
+            return None
+            
         if curr_date.year not in self._years_loaded:
             self.__generate_festivities(curr_date.year)
 
