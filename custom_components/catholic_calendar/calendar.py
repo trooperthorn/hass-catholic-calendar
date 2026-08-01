@@ -57,7 +57,9 @@ class CatholicCalendar(CalendarEntity):
             "manufacturer": "Catholic Calendar",
             "entry_type": "service",
         }
-        
+
+        self._years_loaded: list[int] = []
+        self._events = []
         # ... Leave the rest of your original __init__ code below here ...
         # (e.g., setting up your CalendarGenerator, etc.)
 
