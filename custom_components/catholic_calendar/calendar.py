@@ -53,9 +53,7 @@ class CatholicCalendar(CalendarEntity):
         
         self._years_loaded: list[int] = []
         self._events: list[CalendarEvent] = []
-
-
-    async def async_load_year(self, year: int) -> None:
+async def async_load_year(self, year: int) -> None:
         """Run the heavy synchronous generator in a background thread."""
         if year in self._years_loaded:
             return
@@ -64,16 +62,38 @@ class CatholicCalendar(CalendarEntity):
         generator = CalendarGenerator(year)
         
         # Run the heavy file-reading and looping generation in the background executor
-        festivities = await self.hass.async_add_executor_job(
+        returned_data = await self.hass.async_add_executor_job(
             generator.generate_festivities
         )
 
-        # Parse the returned list into Home Assistant CalendarEvents
-        for festivity in festivities:
-            summary = festivity.get("name", "Unknown")
+        # 1. Normalize the returned data into a flat list of event dictionaries
+        normalized_festivities = []
+        
+        if isinstance(returned_data, dict):
+            # If it returned a dict, extract the values
+            for key, val in returned_data.items():
+                if isinstance(val, list):
+                    normalized_festivities.extend(val)
+                elif isinstance(val, dict):
+                    # Inject the date key if the dict doesn't have it
+                    if "date" not in val:
+                        val["date"] = key
+                    normalized_festivities.append(val)
+        elif isinstance(returned_data, list):
+            # If it's already a list, use it directly
+            normalized_festivities = returned_data
+
+        # 2. Process the normalized flat list
+        for festivity in normalized_festivities:
+            
+            # Defend against any rogue raw date objects that might be in the list
+            if not isinstance(festivity, dict):
+                continue
+
+            summary = festivity.get("name", "Unknown Liturgical Day")
             date_val = festivity.get("date")
             
-            # Convert datetime to date if the generator returns datetimes
+            # Convert datetime to date if necessary
             if isinstance(date_val, datetime.datetime):
                 date_val = date_val.date()
                 
@@ -83,14 +103,13 @@ class CatholicCalendar(CalendarEntity):
                         summary=summary,
                         start=date_val,
                         end=date_val + datetime.timedelta(days=1),
-                        description=f"Color: {festivity.get('liturgical_color', '')}\nGrade: {festivity.get('liturgical_grade', '')}"
+                        description=f"Color: {festivity.get('liturgical_color', 'Unknown')}\nGrade: {festivity.get('liturgical_grade', 'Unknown')}"
                     )
                 )
 
-        # Mark the year as loaded and sort chronological
+        # 3. Mark the year as loaded and sort chronologically
         self._years_loaded.append(year)
         self._events.sort(key=lambda e: e.start)
-
 
     @property
     def event(self) -> CalendarEvent | None:
