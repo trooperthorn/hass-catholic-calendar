@@ -56,22 +56,22 @@ class CatholicCalendar(CalendarEntity):
         self._years_loaded: list[int] = []
         self._events: list[CalendarEvent] = []
 
+
     async def async_load_year(self, year: int) -> None:
-        """Run the heavy synchronous generator in a background thread."""
+        """Run the heavy synchronous generator and merge live RSS reflections."""
         if year in self._years_loaded:
             return
 
-        # Instantiate the generator for this specific year
+        # 1. Fetch live RSS reflections for rich text content
+        rss_data = await self._fetch_rss_reflections()
+
+        # 2. Generate base liturgical calendar data
         generator = CalendarGenerator(year)
-        
-        # Run the heavy file-reading and looping generation in the background executor
         returned_data = await self.hass.async_add_executor_job(
             generator.generate_festivities
         )
 
-        # 1. Normalize the returned data into a flat list of event dictionaries
         normalized_festivities = []
-        
         if isinstance(returned_data, dict):
             for key, val in returned_data.items():
                 if isinstance(val, list):
@@ -83,8 +83,18 @@ class CatholicCalendar(CalendarEntity):
         elif isinstance(returned_data, list):
             normalized_festivities = returned_data
 
-    # 2. Process the normalized flat list and deduplicate by (date, summary)
         seen_events = {}
+
+        GRADE_MAP = {
+            0: "Weekday",
+            1: "Commemoration",
+            2: "Optional Memorial",
+            3: "Memorial",
+            4: "Feast",
+            5: "Feast of the Lord",
+            6: "Solemnity",
+            7: "High Solemnity"
+        }
 
         for festivity in normalized_festivities:
             if not isinstance(festivity, dict):
@@ -93,25 +103,12 @@ class CatholicCalendar(CalendarEntity):
             summary = festivity.get("name", "Unknown Liturgical Day")
             date_val = festivity.get("date")
             
-            # Convert datetime to date if necessary
             if isinstance(date_val, datetime.datetime):
                 date_val = date_val.date()
                 
             if not date_val:
                 continue
 
-            # Translate raw grade to human-readable rank
-            GRADE_MAP = {
-                0: "Weekday",
-                1: "Commemoration",
-                2: "Optional Memorial",
-                3: "Memorial",
-                4: "Feast",
-                5: "Feast of the Lord",
-                6: "Solemnity",
-                7: "High Solemnity"
-            }
-            
             raw_grade = festivity.get('liturgical_grade', 0)
             try:
                 grade_name = GRADE_MAP.get(int(raw_grade), str(raw_grade))
@@ -119,30 +116,37 @@ class CatholicCalendar(CalendarEntity):
                 grade_name = str(raw_grade)
 
             color = str(festivity.get('liturgical_color', 'Unknown')).capitalize()
-            
-            # Format date for USCCB URL structure (MMDDYY)
             usccb_date_str = date_val.strftime('%m%d%y')
             usccb_url = f"https://bible.usccb.org/bible/readings/{usccb_date_str}.cfm"
             
-            # Build the rich description with Spotify, USCCB, and My Catholic Life links
-            encoded_name = urllib.parse.quote(summary)
-            desc = (
-                f"Vestment Color: {color}\n"
-                f"Rank: {grade_name}\n\n"
-                f"📖 USCCB Daily Scripture Readings:\n"
-                f"{usccb_url}\n\n"
-                f"🎧 Listen on Spotify (Catholic Daily Reflections):\n"
-                f"https://open.spotify.com/show/2uQGw4NXrRGubjtbeLKiTs\n\n"
-                f"🕊️ My Catholic Life! Reflection & Calendar:\n"
-                f"https://mycatholic.life/liturgy/liturgical-calendar/\n\n"
-                f"🔍 Search My Catholic Life for '{summary}':\n"
-                f"https://mycatholic.life/?s={encoded_name}"
-            )
+            # Check if we have a live RSS reflection for this specific date
+            rss_entry = rss_data.get(date_val)
+            
+            if rss_entry:
+                # Use the rich reflection post content if available
+                reflection_link = rss_entry["link"]
+                # Clean up HTML tags if needed, or leave raw for markdown rendering
+                reflection_body = rss_entry["content"]
+                desc = (
+                    f"Vestment Color: {color}\n"
+                    f"Rank: {grade_name}\n\n"
+                    f"📖 USCCB Daily Readings:\n{usccb_url}\n\n"
+                    f"🎧 Listen on Spotify:\nhttps://open.spotify.com/show/2uQGw4NXrRGubjtbeLKiTs\n\n"
+                    f"🕊️ Daily Reflection Text:\n{reflection_link}\n\n"
+                    f"{reflection_body}"
+                )
+            else:
+                encoded_name = urllib.parse.quote(summary)
+                desc = (
+                    f"Vestment Color: {color}\n"
+                    f"Rank: {grade_name}\n\n"
+                    f"📖 USCCB Daily Readings:\n{usccb_url}\n\n"
+                    f"🎧 Listen on Spotify:\nhttps://open.spotify.com/show/2uQGw4NXrRGubjtbeLKiTs\n\n"
+                    f"🕊️ My Catholic Life! Calendar:\nhttps://mycatholic.life/liturgy/liturgical-calendar/\n\n"
+                    f"🔍 Search:\nhttps://mycatholic.life/?s={encoded_name}"
+                )
 
-            # Unique key for deduplication (Same day + Same title)
             event_key = (date_val, summary.strip().lower())
-
-            # Store / Overwrite with the best available data
             seen_events[event_key] = CalendarEvent(
                 summary=summary,
                 start=date_val,
@@ -150,10 +154,7 @@ class CatholicCalendar(CalendarEntity):
                 description=desc
             )
 
-        # 3. Push deduplicated events into the final array
         self._events.extend(seen_events.values())
-
-        # 4. Mark the year as loaded and sort chronologically
         self._years_loaded.append(year)
         self._events.sort(key=lambda e: e.start)
     @property
@@ -192,3 +193,60 @@ class CatholicCalendar(CalendarEntity):
                 calendar_events.append(event)
                 
         return calendar_events
+
+
+    async def _fetch_rss_reflections(self) -> dict:
+        """Fetch and parse My Catholic Life RSS feed in a background thread."""
+        import urllib.request
+        import xml.etree.ElementTree as ET
+        from datetime import datetime
+
+        def _pull_and_parse():
+            rss_url = "https://catholic-daily-reflections.com/feed/"
+            reflections = {}
+            try:
+                req = urllib.request.Request(
+                    rss_url, 
+                    headers={'User-Agent': 'HomeAssistant-CatholicCalendar/1.0'}
+                )
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    xml_data = response.read()
+                
+                root = ET.fromstring(xml_data)
+                channel = root.find('channel')
+                if not channel:
+                    return reflections
+
+                for item in channel.findall('item'):
+                    title_el = item.find('title')
+                    pub_date_el = item.find('pubDate')
+                    link_el = item.find('link')
+                    desc_el = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+                    if desc_el is None:
+                        desc_el = item.find('description')
+
+                    if title_el is not None and pub_date_el is not None:
+                        title = title_el.text or ""
+                        pub_str = pub_date_el.text or ""
+                        link = link_el.text if link_el is not None else ""
+                        content = desc_el.text if desc_el is not None else ""
+
+                        # Parse standard RSS pubDate (e.g., Sat, 01 Aug 2026 04:00:00 +0000)
+                        for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S %Z"):
+                            try:
+                                dt_obj = datetime.strptime(pub_str.strip(), fmt)
+                                date_key = dt_obj.date()
+                                reflections[date_key] = {
+                                    "title": title,
+                                    "link": link,
+                                    "content": content
+                                }
+                                break
+                            except ValueError:
+                                continue
+            except Exception as err:
+                _LOGGER.error("Failed to fetch My Catholic Life RSS feed: %s", err)
+            
+            return reflections
+
+        return await self.hass.async_add_executor_job(_pull_and_parse)
