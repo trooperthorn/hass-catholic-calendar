@@ -191,7 +191,7 @@ class CatholicCalendar(CalendarEntity):
 
             color = str(festivity.get('liturgical_color', 'Unknown')).capitalize()
             usccb_date_str = date_val.strftime('%m%d%y')
-            usccb_url = f"https://bible.usccb.org/bible/readings/{usccb_date_str}.cfm"
+            usccb_url = f"https://bible.usccb.org/bible/readings/"
             
             # Check for live RSS reflection matching this date
             rss_entry = rss_data.get(date_val)
