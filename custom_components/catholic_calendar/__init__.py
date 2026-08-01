@@ -4,7 +4,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 
-PLATFORMS = ["sensor", "calendar"]
+PLATFORMS = ["calendar"]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Catholic Calendar from a config entry."""
