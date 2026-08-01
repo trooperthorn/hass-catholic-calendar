@@ -35,6 +35,7 @@ async def async_setup_entry(
         [
             CatholicCalendar(
                 name=name,
+                unique_id=entry.entry_id,
             ),
         ],
         update_before_add=True,
