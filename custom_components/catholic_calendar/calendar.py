@@ -4,7 +4,9 @@ from __future__ import annotations
 import logging
 import datetime
 import urllib.parse
-
+import re
+import urllib.request
+import xml.etree.ElementTree as ET
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
@@ -32,6 +34,7 @@ async def async_setup_entry(
             CatholicCalendar(
                 name=name,
                 unique_id=entry.entry_id,
+                hass=hass,
             ),
         ],
         update_before_add=True,
@@ -41,8 +44,9 @@ async def async_setup_entry(
 class CatholicCalendar(CalendarEntity):
     """Representation of a Catholic Calendar."""
 
-    def __init__(self, name: str, unique_id: str) -> None:
+    def __init__(self, name: str, unique_id: str, hass: HomeAssistant) -> None:
         """Initialize the calendar."""
+        self.hass = hass
         self._attr_name = name
         self._attr_unique_id = unique_id
         
@@ -56,6 +60,76 @@ class CatholicCalendar(CalendarEntity):
         self._years_loaded: list[int] = []
         self._events: list[CalendarEvent] = []
 
+    def _clean_html(self, raw_html: str) -> str:
+        """Strip HTML tags and clean up whitespace for calendar display."""
+        if not raw_html:
+            return ""
+        clean = re.sub(r'<script.*?>.*?</script>', '', raw_html, flags=re.DOTALL)
+        clean = re.sub(r'<style.*?>.*?</style>', '', clean, flags=re.DOTALL)
+        clean = re.sub(r'<br\s*/?>', '\n', clean)
+        clean = re.sub(r'</p>', '\n\n', clean)
+        clean = re.sub(r'<.*?>', '', clean)
+        clean = (
+            clean.replace('&amp;', '&')
+            .replace('&nbsp;', ' ')
+            .replace('&#8217;', "'")
+            .replace('&#8211;', '-')
+            .replace('&#8220;', '"')
+            .replace('&#8221;', '"')
+        )
+        clean = re.sub(r'\n\s*\n', '\n\n', clean)
+        return clean.strip()
+
+    async def _fetch_rss_reflections(self) -> dict:
+        """Fetch and parse My Catholic Life RSS feed in a background thread."""
+        def _pull_and_parse():
+            rss_url = "https://catholic-daily-reflections.com/feed/"
+            reflections = {}
+            try:
+                req = urllib.request.Request(
+                    rss_url, 
+                    headers={'User-Agent': 'HomeAssistant-CatholicCalendar/1.0'}
+                )
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    xml_data = response.read()
+                
+                root = ET.fromstring(xml_data)
+                channel = root.find('channel')
+                if not channel:
+                    return reflections
+
+                for item in channel.findall('item'):
+                    title_el = item.find('title')
+                    pub_date_el = item.find('pubDate')
+                    link_el = item.find('link')
+                    desc_el = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+                    if desc_el is None:
+                        desc_el = item.find('description')
+
+                    if title_el is not None and pub_date_el is not None:
+                        title = title_el.text or ""
+                        pub_str = pub_date_el.text or ""
+                        link = link_el.text if link_el is not None else ""
+                        content = desc_el.text if desc_el is not None else ""
+
+                        for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S %Z"):
+                            try:
+                                dt_obj = datetime.datetime.strptime(pub_str.strip(), fmt)
+                                date_key = dt_obj.date()
+                                reflections[date_key] = {
+                                    "title": title,
+                                    "link": link,
+                                    "content": content
+                                }
+                                break
+                            except ValueError:
+                                continue
+            except Exception as err:
+                _LOGGER.error("Failed to fetch My Catholic Life RSS feed: %s", err)
+            
+            return reflections
+
+        return await self.hass.async_add_executor_job(_pull_and_parse)
 
     async def async_load_year(self, year: int) -> None:
         """Run the heavy synchronous generator and merge live RSS reflections."""
@@ -65,7 +139,7 @@ class CatholicCalendar(CalendarEntity):
         # 1. Fetch live RSS reflections for rich text content
         rss_data = await self._fetch_rss_reflections()
 
-        # 2. Generate base liturgical calendar data
+        # 2. Generate base liturgical calendar data in background thread
         generator = CalendarGenerator(year)
         returned_data = await self.hass.async_add_executor_job(
             generator.generate_festivities
@@ -119,20 +193,19 @@ class CatholicCalendar(CalendarEntity):
             usccb_date_str = date_val.strftime('%m%d%y')
             usccb_url = f"https://bible.usccb.org/bible/readings/{usccb_date_str}.cfm"
             
-            # Check if we have a live RSS reflection for this specific date
+            # Check for live RSS reflection matching this date
             rss_entry = rss_data.get(date_val)
             
             if rss_entry:
-                # Use the rich reflection post content if available
                 reflection_link = rss_entry["link"]
-                # Clean up HTML tags if needed, or leave raw for markdown rendering
-                reflection_body = rss_entry["content"]
+                reflection_body = self._clean_html(rss_entry["content"])
                 desc = (
                     f"Vestment Color: {color}\n"
                     f"Rank: {grade_name}\n\n"
                     f"📖 USCCB Daily Readings:\n{usccb_url}\n\n"
                     f"🎧 Listen on Spotify:\nhttps://open.spotify.com/show/2uQGw4NXrRGubjtbeLKiTs\n\n"
-                    f"🕊️ Daily Reflection Text:\n{reflection_link}\n\n"
+                    f"🕊️ Daily Reflection Link:\n{reflection_link}\n\n"
+                    f"--- DAILY REFLECTION ---\n"
                     f"{reflection_body}"
                 )
             else:
@@ -157,6 +230,7 @@ class CatholicCalendar(CalendarEntity):
         self._events.extend(seen_events.values())
         self._years_loaded.append(year)
         self._events.sort(key=lambda e: e.start)
+
     @property
     def event(self) -> CalendarEvent | None:
         """Return the next upcoming event for Home Assistant state."""
