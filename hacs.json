@@ -1,4 +1,6 @@
 {
-  "name": "Catholic Calendar integration",
-  "render_readme": true
+  "name": "Catholic Calendar",
+  "render_readme": true,
+  "hacs": "2.0.0",
+  "zip_release": false
 }
