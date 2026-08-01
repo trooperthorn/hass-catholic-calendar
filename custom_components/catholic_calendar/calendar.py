@@ -42,21 +42,24 @@ async def async_setup_entry(
     )
 
 # ... Leave your `class CatholicCalendar(CalendarEntity):` and everything below it exactly as it is ...
-
 class CatholicCalendar(CalendarEntity):
-    """Representation of a CatholicCalendar calendar."""
+    """Representation of a Catholic Calendar."""
 
-    _attr_force_update = True
-
-    def __init__(
-        self: CatholicCalendar,
-        name: str,
-    ) -> None:
-        """Initialize the CatholicCalendar calendar."""
+    def __init__(self, name: str, unique_id: str) -> None:
+        """Initialize the calendar."""
         self._attr_name = name
-        self._years_loaded: list[int] = []
-        self._festivities: dict[datetime.datetime, list[dict[str, str]]] = {}
-        _LOGGER.debug("CatholicCalendar initialized - %s", self)
+        self._attr_unique_id = unique_id
+        
+        # This is the magic block that groups the entity under the Integration page
+        self._attr_device_info = {
+            "identifiers": {("catholic_calendar", unique_id)},
+            "name": name,
+            "manufacturer": "Catholic Calendar",
+            "entry_type": "service",
+        }
+        
+        # ... Leave the rest of your original __init__ code below here ...
+        # (e.g., setting up your CalendarGenerator, etc.)
 
     def __repr__(self: CatholicCalendar) -> str:
         """Return the representation."""
