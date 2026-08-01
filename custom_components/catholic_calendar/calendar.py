@@ -47,6 +47,7 @@ class CatholicCalendar(CalendarEntity):
 
     def __init__(self, name: str, unique_id: str) -> None:
         """Initialize the calendar."""
+        self._generator = CalendarGenerator(self.hass)
         self._attr_name = name
         self._attr_unique_id = unique_id
         
@@ -64,7 +65,7 @@ class CatholicCalendar(CalendarEntity):
         self._festivities = {}
         # ---------------------------------------------------------------------
         # (e.g., setting up your CalendarGenerator, etc.)
-
+        
     def __repr__(self: CatholicCalendar) -> str:
         """Return the representation."""
         return "CatholicCalendar"
