@@ -53,7 +53,8 @@ class CatholicCalendar(CalendarEntity):
         
         self._years_loaded: list[int] = []
         self._events: list[CalendarEvent] = []
-async def async_load_year(self, year: int) -> None:
+
+    async def async_load_year(self, year: int) -> None:
         """Run the heavy synchronous generator in a background thread."""
         if year in self._years_loaded:
             return
@@ -70,23 +71,18 @@ async def async_load_year(self, year: int) -> None:
         normalized_festivities = []
         
         if isinstance(returned_data, dict):
-            # If it returned a dict, extract the values
             for key, val in returned_data.items():
                 if isinstance(val, list):
                     normalized_festivities.extend(val)
                 elif isinstance(val, dict):
-                    # Inject the date key if the dict doesn't have it
                     if "date" not in val:
                         val["date"] = key
                     normalized_festivities.append(val)
         elif isinstance(returned_data, list):
-            # If it's already a list, use it directly
             normalized_festivities = returned_data
 
         # 2. Process the normalized flat list
         for festivity in normalized_festivities:
-            
-            # Defend against any rogue raw date objects that might be in the list
             if not isinstance(festivity, dict):
                 continue
 
@@ -126,7 +122,6 @@ async def async_load_year(self, year: int) -> None:
                 
         return None
 
-
     async def async_get_events(
         self,
         hass: HomeAssistant,
@@ -134,8 +129,6 @@ async def async_load_year(self, year: int) -> None:
         end_date: datetime.datetime,
     ) -> list[CalendarEvent]:
         """Return calendar events within a datetime range."""
-        _LOGGER.debug("Fetching events between %s and %s", start_date, end_date)
-        
         years_needed = set(range(start_date.year, end_date.year + 1))
         
         for year in years_needed:
