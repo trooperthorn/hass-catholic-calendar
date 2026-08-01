@@ -83,7 +83,9 @@ class CatholicCalendar(CalendarEntity):
         elif isinstance(returned_data, list):
             normalized_festivities = returned_data
 
-        # 2. Process the normalized flat list
+    # 2. Process the normalized flat list and deduplicate by (date, summary)
+        seen_events = {}
+
         for festivity in normalized_festivities:
             if not isinstance(festivity, dict):
                 continue
@@ -95,64 +97,57 @@ class CatholicCalendar(CalendarEntity):
             if isinstance(date_val, datetime.datetime):
                 date_val = date_val.date()
                 
-            if date_val:
-                self._events.append(
-                    CalendarEvent(
-                        summary=summary,
-                        start=date_val,
-                        end=date_val + datetime.timedelta(days=1),
-                        description=f"Color: {festivity.get('liturgical_color', 'Unknown')}\nGrade: {festivity.get('liturgical_grade', 'Unknown')}"
-                    )
-                )
+            if not date_val:
+                continue
 
-
-            # 1. Translate the numerical grade into a human-readable rank
-                GRADE_MAP = {
-                    0: "Weekday",
-                    1: "Commemoration",
-                    2: "Optional Memorial",
-                    3: "Memorial",
-                    4: "Feast",
-                    5: "Feast of the Lord",
-                    6: "Solemnity",
-                    7: "High Solemnity"
-                }
-                
-                raw_grade = festivity.get('liturgical_grade', 0)
-                try:
-                    grade_name = GRADE_MAP.get(int(raw_grade), str(raw_grade))
-                except (ValueError, TypeError):
-                    grade_name = str(raw_grade)
-
-            # 2. Format the color
-                color = str(festivity.get('liturgical_color', 'Unknown')).capitalize()
+            # Translate raw grade to human-readable rank
+            GRADE_MAP = {
+                0: "Weekday",
+                1: "Commemoration",
+                2: "Optional Memorial",
+                3: "Memorial",
+                4: "Feast",
+                5: "Feast of the Lord",
+                6: "Solemnity",
+                7: "High Solemnity"
+            }
             
-            # 3. Generate dynamic links to My Catholic Life
-                encoded_name = urllib.parse.quote(summary)
+            raw_grade = festivity.get('liturgical_grade', 0)
+            try:
+                grade_name = GRADE_MAP.get(int(raw_grade), str(raw_grade))
+            except (ValueError, TypeError):
+                grade_name = str(raw_grade)
+
+            color = str(festivity.get('liturgical_color', 'Unknown')).capitalize()
             
-                desc = (
-                    f"Vestment Color: {color}\n"
-                    f"Rank: {grade_name}\n\n"
-                    f"📖 Daily Readings & Reflection:\n"
-                    f"https://mycatholic.life/liturgy/liturgical-calendar/\n\n"
-                    f"🔍 Learn more about this day:\n"
-                    f"https://mycatholic.life/?s={encoded_name}"
-                )
+            # Build the rich description
+            encoded_name = urllib.parse.quote(summary)
+            desc = (
+                f"Vestment Color: {color}\n"
+                f"Rank: {grade_name}\n\n"
+                f"📖 Daily Readings & Reflection:\n"
+                f"https://mycatholic.life/liturgy/liturgical-calendar/\n\n"
+                f"🔍 Learn more about this day:\n"
+                f"https://mycatholic.life/?s={encoded_name}"
+            )
 
-            # 4. Append the rich event to the calendar
-                self._events.append(
-                    CalendarEvent(
-                        summary=summary,
-                        start=date_val,
-                        end=date_val + datetime.timedelta(days=1),
-                        description=desc
-                    )
-                )
+            # Unique key for deduplication (Same day + Same title)
+            event_key = (date_val, summary.strip().lower())
 
-        # 3. Mark the year as loaded and sort chronologically
+            # Store / Overwrite with the best available data
+            seen_events[event_key] = CalendarEvent(
+                summary=summary,
+                start=date_val,
+                end=date_val + datetime.timedelta(days=1),
+                description=desc
+            )
+
+        # 3. Push deduplicated events into the final array
+        self._events.extend(seen_events.values())
+
+        # 4. Mark the year as loaded and sort chronologically
         self._years_loaded.append(year)
         self._events.sort(key=lambda e: e.start)
-
     @property
     def event(self) -> CalendarEvent | None:
         """Return the next upcoming event for Home Assistant state."""
